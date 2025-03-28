@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { collection, onSnapshot, query, where, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, query, getDocs } from "firebase/firestore";
 import { db } from "./firebase/firebase";
 import { fetchMatchDetails } from "./services/cricbuzzApi";
 import MatchCard from "./components/MatchCard";
@@ -10,7 +10,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
-  const [filter, setFilter] = useState("all"); // all, live, upcoming, completed
+  const [filter, setFilter] = useState("all");
   const MAX_RETRIES = 3;
 
   const handleError = useCallback((message, isFatal = false) => {
@@ -21,17 +21,16 @@ function App() {
     }
   }, []);
 
-  // Function to check Firestore collection structure
   const checkFirestoreStructure = async () => {
     try {
       const matchesRef = collection(db, "matches");
       const snapshot = await getDocs(matchesRef);
       console.log("Firestore Collection Structure:", {
         totalDocs: snapshot.size,
-        docs: snapshot.docs.map(doc => ({
+        docs: snapshot.docs.map((doc) => ({
           id: doc.id,
-          data: doc.data()
-        }))
+          data: doc.data(),
+        })),
       });
     } catch (err) {
       console.error("Error checking Firestore structure:", err);
@@ -39,34 +38,20 @@ function App() {
   };
 
   useEffect(() => {
-    // Check Firestore structure on component mount
     checkFirestoreStructure();
 
     const matchesRef = collection(db, "matches");
-    // Remove the where clause temporarily to see all documents
     const q = query(matchesRef);
-    
+
     const unsub = onSnapshot(
       q,
       async (snapshot) => {
         try {
-          console.log("Firestore Snapshot:", {
-            empty: snapshot.empty,
-            size: snapshot.size,
-            docs: snapshot.docs.map(doc => ({
-              id: doc.id,
-              data: doc.data()
-            }))
-          });
-
           const matchPromises = snapshot.docs.map(async (doc) => {
             const data = doc.data();
-            console.log("Processing document:", { id: doc.id, data });
-            
             if (data?.matchId) {
               try {
                 const matchDetails = await fetchMatchDetails(data.matchId);
-                console.log("Fetched match details:", matchDetails);
                 return matchDetails;
               } catch (err) {
                 console.error(`Error fetching match ${data.matchId}:`, err);
@@ -77,10 +62,8 @@ function App() {
           });
 
           const matchResults = await Promise.all(matchPromises);
-          const validMatches = matchResults.filter(match => match !== null);
-          
-          console.log("Valid matches:", validMatches);
-          
+          const validMatches = matchResults.filter((match) => match !== null);
+
           if (validMatches.length === 0) {
             handleError("No active matches found. Please check back later.");
           } else {
@@ -106,29 +89,27 @@ function App() {
     if (!matches.length) return;
 
     const intervalId = setInterval(() => {
-      const liveMatches = matches.filter(match => match.status === "live");
+      const liveMatches = matches.filter((match) => match.status === "live");
       if (liveMatches.length > 0) {
-        // Refresh live matches
         liveMatches.forEach(async (match) => {
           try {
             const updatedMatch = await fetchMatchDetails(match.matchId);
-            setMatches(prevMatches => 
-              prevMatches.map(m => 
+            setMatches((prevMatches) =>
+              prevMatches.map((m) =>
                 m.matchId === updatedMatch.matchId ? updatedMatch : m
               )
             );
           } catch (err) {
             console.error(`Error updating live match ${match.matchId}:`, err);
-            // Don't show error to user for live updates
           }
         });
       }
-    }, 30000); // Refresh every 30 seconds
+    }, 30000);
 
     return () => clearInterval(intervalId);
   }, [matches]);
 
-  const filteredMatches = matches.filter(match => {
+  const filteredMatches = matches.filter((match) => {
     if (filter === "all") return true;
     return match.status === filter;
   });
@@ -194,8 +175,16 @@ function App() {
         {error && (
           <div className="p-4 mb-6 text-red-700 bg-red-100 border-l-4 border-red-500 rounded">
             <div className="flex items-center">
-              <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              <svg
+                className="w-5 h-5 mr-2"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
               </svg>
               <p className="font-medium">{error}</p>
             </div>
@@ -219,8 +208,18 @@ function App() {
           </div>
         ) : (
           <div className="p-8 text-center text-gray-400 bg-gray-700 rounded-lg">
-            <svg className="w-16 h-16 mx-auto mb-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg
+              className="w-16 h-16 mx-auto mb-4 text-gray-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
             <p className="text-lg">No matches found for the selected filter</p>
             <button

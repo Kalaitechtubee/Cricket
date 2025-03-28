@@ -1,4 +1,3 @@
-// src/services/cricbuzzApi.js
 import axios from "axios";
 
 const MATCH_DETAILS_URL = "/api/cricket-match/commentary/";
@@ -54,9 +53,13 @@ const validateMatchData = (data) => {
 
 // Data transformation
 const transformMatchHeader = (matchHeader) => {
-  const status = matchHeader.complete ? "completed" : 
-                 matchHeader.status === "Match Ended" ? "completed" :
-                 matchHeader.status === "In Progress" ? "live" : "upcoming";
+  const status = matchHeader.complete
+    ? "completed"
+    : matchHeader.status === "Match Ended"
+    ? "completed"
+    : matchHeader.status === "In Progress"
+    ? "live"
+    : "upcoming";
 
   return {
     matchId: matchHeader.matchId,
@@ -82,10 +85,12 @@ const transformMatchHeader = (matchHeader) => {
       country: matchHeader.venueInfo?.country || "Unknown Country",
       startTime: matchHeader.venueInfo?.startTime,
     },
-    result: matchHeader.status ? {
-      winningTeamId: matchHeader.team2?.id?.toString() || "2",
-      resultText: matchHeader.status,
-    } : null,
+    result: matchHeader.status
+      ? {
+          winningTeamId: matchHeader.team2?.id?.toString() || "2",
+          resultText: matchHeader.status,
+        }
+      : null,
   };
 };
 
@@ -95,76 +100,43 @@ const transformMiniscore = (miniscore) => {
       team1Score: { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
       team2Score: { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
       currentRunRate: "0.00",
-      requiredRunRate: "0.00",
-      lastWicket: "No wickets yet",
-      partnership: "0",
-      lastOver: "No overs bowled yet",
-      matchStatus: "Match not started"
+      matchStatus: "Match not started",
     };
   }
-  
+
   return {
     team1Score: miniscore.team1Score || { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
     team2Score: miniscore.team2Score || { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
     currentRunRate: miniscore.currentRunRate || "0.00",
-    requiredRunRate: miniscore.requiredRunRate || "0.00",
-    lastWicket: miniscore.lastWicket || "No wickets yet",
-    partnership: miniscore.partnership || "0",
-    lastOver: miniscore.lastOver || "No overs bowled yet",
-    matchStatus: miniscore.matchStatus || "Match not started"
+    matchStatus: miniscore.matchStatus || "Match not started",
   };
-};
-
-const calculatePoints = (matchInfo, matchScore) => {
-  if (matchInfo.status !== "completed") return { team1Points: 0, team2Points: 0 };
-
-  const team1Score = matchScore.team1Score?.inngs1?.runs || 0;
-  const team2Score = matchScore.team2Score?.inngs1?.runs || 0;
-  const winner = matchInfo.result?.winningTeamId;
-
-  let team1Points = 0;
-  let team2Points = 0;
-
-  if (winner) {
-    if (winner === matchInfo.team1.id) {
-      team1Points = 2;
-      team2Points = 0;
-    } else if (winner === matchInfo.team2.id) {
-      team2Points = 2;
-      team1Points = 0;
-    }
-  } else {
-    team1Points = 1;
-    team2Points = 1;
-  }
-
-  return { team1Points, team2Points };
 };
 
 const transformBattingStats = (battingData) => {
   if (!battingData) return [];
-  
-  return battingData.map(player => ({
+
+  return battingData.map((player) => ({
     name: player.name,
     runs: player.runs || 0,
     balls: player.balls || 0,
     fours: player.fours || 0,
     sixes: player.sixes || 0,
     strikeRate: player.strikeRate || "0.00",
-    notOut: player.notOut || false
+    isBatting: player.isBatting || false,
   }));
 };
 
 const transformBowlingStats = (bowlingData) => {
   if (!bowlingData) return [];
-  
-  return bowlingData.map(player => ({
+
+  return bowlingData.map((player) => ({
     name: player.name,
     overs: player.overs || "0.0",
     maidens: player.maidens || 0,
     runs: player.runs || 0,
     wickets: player.wickets || 0,
-    economy: player.economy || "0.00"
+    economy: player.economy || "0.00",
+    isBowling: player.isBowling || false,
   }));
 };
 
@@ -221,28 +193,23 @@ export const fetchMatchDetails = async (matchId) => {
               score: miniscore.team2Score?.inngs1?.runs || 0,
               wickets: miniscore.team2Score?.inngs1?.wickets || 0,
               overs: miniscore.team2Score?.inngs1?.overs || "0.0",
-              runRate: miniscore.requiredRunRate,
+              runRate: miniscore.currentRunRate,
             },
           ],
           venue: matchHeader.venue,
           result: matchHeader.result,
-          points: calculatePoints(matchHeader, miniscore),
-          battingStats,
           scoreboard: {
             currentRunRate: miniscore.currentRunRate,
-            requiredRunRate: miniscore.requiredRunRate,
-            lastWicket: miniscore.lastWicket,
-            partnership: miniscore.partnership,
-            lastOver: miniscore.lastOver,
             matchStatus: miniscore.matchStatus,
-            bowlingStats
+            battingStats,
+            bowlingStats,
           },
           additionalInfo: {
             "Match Type": matchData.matchHeader?.matchType || "N/A",
             "Toss Winner": matchData.matchHeader?.tossWinner || "N/A",
             "Toss Decision": matchData.matchHeader?.tossDecision || "N/A",
-            "Venue": `${matchHeader.venue.ground}, ${matchHeader.venue.city}`,
-            "Start Time": new Date(matchHeader.startTime).toLocaleString()
+            Venue: `${matchHeader.venue.ground}, ${matchHeader.venue.city}`,
+            "Start Time": new Date(matchHeader.startTime).toLocaleString(),
           },
         };
 
@@ -252,7 +219,7 @@ export const fetchMatchDetails = async (matchId) => {
         lastError = error;
         retries++;
         if (retries < MAX_RETRIES) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+          await new Promise((resolve) => setTimeout(resolve, 1000 * retries));
         }
       }
     }
@@ -270,5 +237,4 @@ export const fetchMatchDetails = async (matchId) => {
   }
 };
 
-// Export cache methods for testing
 export const clearCache = () => matchCache.clear();
