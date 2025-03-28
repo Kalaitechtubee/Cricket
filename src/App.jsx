@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, query, where, getDocs } from "firebase/firestore";
 import { db } from "./firebase/firebase";
 import { fetchMatchDetails } from "./services/cricbuzzApi";
 import MatchCard from "./components/MatchCard";
 import Loading from "./components/Loading";
 
 function App() {
-  const [matchId, setMatchId] = useState(null);
-  const [match, setMatch] = useState(null);
+  const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [filter, setFilter] = useState("all"); // all, live, upcoming, completed
   const MAX_RETRIES = 3;
 
   const handleError = useCallback((message, isFatal = false) => {
@@ -21,22 +21,77 @@ function App() {
     }
   }, []);
 
+  // Function to check Firestore collection structure
+  const checkFirestoreStructure = async () => {
+    try {
+      const matchesRef = collection(db, "matches");
+      const snapshot = await getDocs(matchesRef);
+      console.log("Firestore Collection Structure:", {
+        totalDocs: snapshot.size,
+        docs: snapshot.docs.map(doc => ({
+          id: doc.id,
+          data: doc.data()
+        }))
+      });
+    } catch (err) {
+      console.error("Error checking Firestore structure:", err);
+    }
+  };
+
   useEffect(() => {
-    const matchRef = doc(db, "matches", "currentMatch");
+    // Check Firestore structure on component mount
+    checkFirestoreStructure();
+
+    const matchesRef = collection(db, "matches");
+    // Remove the where clause temporarily to see all documents
+    const q = query(matchesRef);
+    
     const unsub = onSnapshot(
-      matchRef,
-      (docSnapshot) => {
-        if (docSnapshot.exists()) {
-          const data = docSnapshot.data();
-          if (data?.matchId) {
-            console.log("Match ID from Firestore:", data.matchId);
-            setMatchId(data.matchId);
-            setError(null);
+      q,
+      async (snapshot) => {
+        try {
+          console.log("Firestore Snapshot:", {
+            empty: snapshot.empty,
+            size: snapshot.size,
+            docs: snapshot.docs.map(doc => ({
+              id: doc.id,
+              data: doc.data()
+            }))
+          });
+
+          const matchPromises = snapshot.docs.map(async (doc) => {
+            const data = doc.data();
+            console.log("Processing document:", { id: doc.id, data });
+            
+            if (data?.matchId) {
+              try {
+                const matchDetails = await fetchMatchDetails(data.matchId);
+                console.log("Fetched match details:", matchDetails);
+                return matchDetails;
+              } catch (err) {
+                console.error(`Error fetching match ${data.matchId}:`, err);
+                return null;
+              }
+            }
+            return null;
+          });
+
+          const matchResults = await Promise.all(matchPromises);
+          const validMatches = matchResults.filter(match => match !== null);
+          
+          console.log("Valid matches:", validMatches);
+          
+          if (validMatches.length === 0) {
+            handleError("No active matches found. Please check back later.");
           } else {
-            handleError("No match ID found in Firestore", true);
+            setMatches(validMatches);
+            setError(null);
           }
-        } else {
-          handleError("No active match found", true);
+        } catch (err) {
+          handleError(`Failed to process matches: ${err.message}`);
+        } finally {
+          setRetryCount(0);
+          setLoading(false);
         }
       },
       (err) => {
@@ -48,51 +103,35 @@ function App() {
   }, [handleError]);
 
   useEffect(() => {
-    if (!matchId) return;
+    if (!matches.length) return;
 
-    let intervalId;
-    let isMounted = true;
-
-    const fetchData = async () => {
-      try {
-        if (!isMounted) return;
-        
-        const data = await fetchMatchDetails(matchId);
-        if (!isMounted) return;
-
-        setMatch(data);
-        setError(null);
-        setRetryCount(0);
-      } catch (err) {
-        if (!isMounted) return;
-
-        const newRetryCount = retryCount + 1;
-        setRetryCount(newRetryCount);
-
-        if (newRetryCount >= MAX_RETRIES) {
-          handleError(`Failed to load match details after ${MAX_RETRIES} attempts: ${err.message}`);
-          setMatch(null);
-        } else {
-          console.warn(`Retry attempt ${newRetryCount} of ${MAX_RETRIES}`);
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+    const intervalId = setInterval(() => {
+      const liveMatches = matches.filter(match => match.status === "live");
+      if (liveMatches.length > 0) {
+        // Refresh live matches
+        liveMatches.forEach(async (match) => {
+          try {
+            const updatedMatch = await fetchMatchDetails(match.matchId);
+            setMatches(prevMatches => 
+              prevMatches.map(m => 
+                m.matchId === updatedMatch.matchId ? updatedMatch : m
+              )
+            );
+          } catch (err) {
+            console.error(`Error updating live match ${match.matchId}:`, err);
+            // Don't show error to user for live updates
+          }
+        });
       }
-    };
+    }, 30000); // Refresh every 30 seconds
 
-    fetchData();
+    return () => clearInterval(intervalId);
+  }, [matches]);
 
-    if (!error && match?.status === "live") {
-      intervalId = setInterval(fetchData, 30000);
-    }
-
-    return () => {
-      isMounted = false;
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [matchId, retryCount, error, match?.status, handleError]);
+  const filteredMatches = matches.filter(match => {
+    if (filter === "all") return true;
+    return match.status === filter;
+  });
 
   const handleRetry = () => {
     setRetryCount(0);
@@ -106,11 +145,60 @@ function App() {
         <h1 className="text-2xl font-bold text-center md:text-3xl">
           Cricket Scoreboard
         </h1>
+        <div className="container px-4 mx-auto mt-4">
+          <div className="flex justify-center space-x-4">
+            <button
+              onClick={() => setFilter("all")}
+              className={`px-4 py-2 rounded ${
+                filter === "all"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              All Matches
+            </button>
+            <button
+              onClick={() => setFilter("live")}
+              className={`px-4 py-2 rounded ${
+                filter === "live"
+                  ? "bg-green-500 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              Live
+            </button>
+            <button
+              onClick={() => setFilter("upcoming")}
+              className={`px-4 py-2 rounded ${
+                filter === "upcoming"
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              Upcoming
+            </button>
+            <button
+              onClick={() => setFilter("completed")}
+              className={`px-4 py-2 rounded ${
+                filter === "completed"
+                  ? "bg-gray-600 text-white"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+              }`}
+            >
+              Completed
+            </button>
+          </div>
+        </div>
       </header>
       <main className="container px-4 py-8 mx-auto">
         {error && (
           <div className="p-4 mb-6 text-red-700 bg-red-100 border-l-4 border-red-500 rounded">
-            <p>{error}</p>
+            <div className="flex items-center">
+              <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              <p className="font-medium">{error}</p>
+            </div>
             {retryCount >= MAX_RETRIES && (
               <button
                 onClick={handleRetry}
@@ -123,16 +211,23 @@ function App() {
         )}
         {loading ? (
           <Loading />
-        ) : match ? (
-          <MatchCard match={match} />
+        ) : filteredMatches.length > 0 ? (
+          <div className="space-y-6">
+            {filteredMatches.map((match) => (
+              <MatchCard key={match.matchId} match={match} />
+            ))}
+          </div>
         ) : (
           <div className="p-8 text-center text-gray-400 bg-gray-700 rounded-lg">
-            <p>No match data available</p>
+            <svg className="w-16 h-16 mx-auto mb-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-lg">No matches found for the selected filter</p>
             <button
-              onClick={handleRetry}
+              onClick={() => setFilter("all")}
               className="px-4 py-2 mt-4 text-white transition-colors bg-blue-500 rounded hover:bg-blue-600"
             >
-              Refresh
+              Show All Matches
             </button>
           </div>
         )}

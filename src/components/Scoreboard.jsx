@@ -48,6 +48,9 @@ const Scoreboard = memo(({ match }) => {
     bowlingStats
   } = match.scoreboard || {};
 
+  const isCompleted = match.status === "completed";
+  const isLive = match.status === "live";
+
   return (
     <div className="mt-6">
       {/* Match Stats */}
@@ -92,7 +95,7 @@ const Scoreboard = memo(({ match }) => {
       </div>
 
       {/* Bowling Stats */}
-      {bowlingStats && bowlingStats.length > 0 && (
+      {(isCompleted || isLive) && bowlingStats && bowlingStats.length > 0 && (
         <BowlingStats stats={bowlingStats} />
       )}
 
@@ -108,6 +111,14 @@ const Scoreboard = memo(({ match }) => {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Match Status */}
+      {isLive && matchStatus && (
+        <div className="p-4 mt-6 bg-gray-800 rounded-lg">
+          <h4 className="mb-2 text-lg font-semibold text-white">Match Status</h4>
+          <p className="text-white">{matchStatus}</p>
         </div>
       )}
     </div>

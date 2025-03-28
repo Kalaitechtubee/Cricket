@@ -90,17 +90,28 @@ const transformMatchHeader = (matchHeader) => {
 };
 
 const transformMiniscore = (miniscore) => {
-  const defaultScore = { inngs1: { runs: 0, wickets: 0, overs: "0.0" } };
+  if (!miniscore) {
+    return {
+      team1Score: { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
+      team2Score: { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
+      currentRunRate: "0.00",
+      requiredRunRate: "0.00",
+      lastWicket: "No wickets yet",
+      partnership: "0",
+      lastOver: "No overs bowled yet",
+      matchStatus: "Match not started"
+    };
+  }
   
   return {
-    team1Score: miniscore.team1Score || defaultScore,
-    team2Score: miniscore.team2Score || defaultScore,
-    currentRunRate: miniscore.currentRunRate,
-    requiredRunRate: miniscore.requiredRunRate,
-    lastWicket: miniscore.lastWicket,
-    partnership: miniscore.partnership,
-    lastOver: miniscore.lastOver,
-    matchStatus: miniscore.matchStatus,
+    team1Score: miniscore.team1Score || { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
+    team2Score: miniscore.team2Score || { inngs1: { runs: 0, wickets: 0, overs: "0.0" } },
+    currentRunRate: miniscore.currentRunRate || "0.00",
+    requiredRunRate: miniscore.requiredRunRate || "0.00",
+    lastWicket: miniscore.lastWicket || "No wickets yet",
+    partnership: miniscore.partnership || "0",
+    lastOver: miniscore.lastOver || "No overs bowled yet",
+    matchStatus: miniscore.matchStatus || "Match not started"
   };
 };
 
@@ -227,9 +238,9 @@ export const fetchMatchDetails = async (matchId) => {
             bowlingStats
           },
           additionalInfo: {
-            "Match Type": matchData.matchHeader.matchType || "N/A",
-            "Toss Winner": matchData.matchHeader.tossWinner || "N/A",
-            "Toss Decision": matchData.matchHeader.tossDecision || "N/A",
+            "Match Type": matchData.matchHeader?.matchType || "N/A",
+            "Toss Winner": matchData.matchHeader?.tossWinner || "N/A",
+            "Toss Decision": matchData.matchHeader?.tossDecision || "N/A",
             "Venue": `${matchHeader.venue.ground}, ${matchHeader.venue.city}`,
             "Start Time": new Date(matchHeader.startTime).toLocaleString()
           },

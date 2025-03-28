@@ -71,7 +71,7 @@ const MatchCard = memo(({ match }) => {
       case "completed":
         return "bg-gray-600";
       case "live":
-        return "bg-blue-500";
+        return "bg-green-500";
       case "upcoming":
         return "bg-blue-500";
       default:
@@ -79,23 +79,56 @@ const MatchCard = memo(({ match }) => {
     }
   };
 
+  const getStatusText = () => {
+    switch (match.status) {
+      case "completed":
+        return "COMPLETED";
+      case "live":
+        return "LIVE";
+      case "upcoming":
+        return "UPCOMING";
+      default:
+        return "UNKNOWN";
+    }
+  };
+
+  const formatStartTime = (startTime) => {
+    const date = new Date(startTime);
+    return date.toLocaleString(undefined, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+  };
+
   return (
     <div className="mb-6 overflow-hidden bg-gray-900 rounded-lg shadow-lg">
       {/* Match Header */}
       <div className="p-4 border-b border-gray-800">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-white">
-            {match.seriesName} - {match.matchNumber}
-          </h2>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium text-white ${getStatusColor()}`}>
-            {isUpcoming ? "UPCOMING" : isLive ? "LIVE" : "COMPLETE"}
-          </span>
+          <div>
+            <h2 className="text-xl font-bold text-white">
+              {match.seriesName} - {match.matchNumber}
+            </h2>
+            <p className="mt-1 text-sm text-gray-400">
+              {match.venue.ground}, {match.venue.city}
+            </p>
+          </div>
+          <div className="flex flex-col items-end">
+            <span className={`px-3 py-1 rounded-full text-sm font-medium text-white ${getStatusColor()}`}>
+              {getStatusText()}
+            </span>
+            {isUpcoming && (
+              <p className="mt-2 text-sm text-gray-400">
+                Starts {formatStartTime(match.startTime)}
+              </p>
+            )}
+          </div>
         </div>
-        {isUpcoming && (
-          <p className="mt-2 text-sm text-gray-400">
-            Match starts at {new Date(match.startTime).toLocaleString()}
-          </p>
-        )}
       </div>
 
       {/* Teams and Scores */}
@@ -112,7 +145,7 @@ const MatchCard = memo(({ match }) => {
           <div className="flex flex-col items-center mx-4">
             <span className="mb-2 text-2xl font-bold text-white">VS</span>
             {isLive && (
-              <span className="text-sm text-blue-400 animate-pulse">Live</span>
+              <span className="text-sm text-green-400 animate-pulse">Live</span>
             )}
           </div>
           <TeamScore 
@@ -128,8 +161,28 @@ const MatchCard = memo(({ match }) => {
 
         {/* Match Result */}
         {isCompleted && match.result && (
-          <div className="mt-4 text-center">
-            <p className="font-medium text-green-400">{match.result.resultText}</p>
+          <div className="mt-4 p-4 text-center bg-gray-800 rounded-lg">
+            <p className="text-lg font-medium text-green-400">{match.result.resultText}</p>
+            {match.points && (
+              <p className="mt-2 text-sm text-gray-400">
+                Points: {match.teams[0].teamName} ({match.points.team1Points}) - {match.teams[1].teamName} ({match.points.team2Points})
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Upcoming Match Info */}
+        {isUpcoming && (
+          <div className="mt-4 p-4 bg-gray-800 rounded-lg">
+            <h4 className="mb-2 text-lg font-semibold text-white">Match Details</h4>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {Object.entries(match.additionalInfo || {}).map(([key, value]) => (
+                <div key={key} className="p-3 bg-gray-700 rounded-lg">
+                  <span className="text-sm text-gray-400">{key}</span>
+                  <p className="mt-1 font-medium text-white">{value}</p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -138,7 +191,7 @@ const MatchCard = memo(({ match }) => {
           <BattingStats stats={match.battingStats} />
         )}
 
-        {/* Additional Match Details */}
+        {/* Scoreboard */}
         {(isCompleted || isLive) && (
           <Scoreboard match={match} />
         )}
