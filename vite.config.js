@@ -17,7 +17,7 @@ export default defineConfig({
       "/api": {
         target: "https://www.cricbuzz.com",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ""), // Remove /api prefix
+        secure: false,
       },
     },
   },

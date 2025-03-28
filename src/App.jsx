@@ -1,103 +1,4 @@
-
-
-
-
-// import React, { useState, useEffect } from "react";
-// import { db } from "./firebase/firebase";
-// import { doc, onSnapshot } from "firebase/firestore";
-// import { fetchCommentary } from "./services/cricbuzzApi";
-// import Scoreboard from "./components/Scoreboard";
-// import Loading from "./components/Loading";
-// import "./index.css";
-
-// function App() {
-//   const [matchId, setMatchId] = useState(null);
-//   const [commentary, setCommentary] = useState(null);
-//   const [loading, setLoading] = useState(true);
-//   const [error, setError] = useState(null);
-
-//   // Fetch matchId from Firestore
-//   useEffect(() => {
-//     const matchRef = doc(db, "matches", "currentMatch");
-//     const unsub = onSnapshot(
-//       matchRef,
-//       (docSnapshot) => {
-//         if (docSnapshot.exists()) {
-//           const data = docSnapshot.data();
-//           console.log("Firestore data:", data);
-//           if (data?.matchId) {
-//             setMatchId(data.matchId);
-//           } else {
-//             setError("No matchId found in Firestore document");
-//             setLoading(false);
-//           }
-//         } else {
-//           setError("Firestore document 'matches/currentMatch' not found");
-//           setLoading(false);
-//         }
-//       },
-//       (err) => {
-//         console.error("Firestore error:", err);
-//         setError(`Failed to connect to Firestore: ${err.message}`);
-//         setLoading(false);
-//       }
-//     );
-
-//     // Cleanup subscription on unmount
-//     return () => unsub();
-//   }, []);
-
-//   // Fetch commentary when matchId changes
-//   useEffect(() => {
-//     if (!matchId) return; // Skip if no matchId
-
-//     const fetchData = async () => {
-//       setLoading(true);
-//       setError(null);
-//       try {
-//         console.log("Fetching commentary for matchId:", matchId);
-//         const data = await fetchCommentary(matchId);
-//         setCommentary(data);
-//       } catch (err) {
-//         setError(`Failed to fetch commentary: ${err.message}`);
-//         setCommentary(null);
-//       } finally {
-//         setLoading(false);
-//       }
-//     };
-
-//     fetchData();
-//   }, [matchId]);
-
-//   return (
-//     <div className="App">
-//       <header>
-//         <h1>Live Cricket Scoreboard</h1>
-//       </header>
-//       <main>
-//         {error && (
-//           <div className="error-message" style={{ color: "red", margin: "1rem 0" }}>
-//             {error}
-//           </div>
-//         )}
-//         {loading ? (
-//           <Loading />
-//         ) : commentary ? (
-//           <Scoreboard commentary={commentary} />
-//         ) : (
-//           <p>No commentary data available</p>
-//         )}
-//       </main>
-//     </div>
-//   );
-// }
-
-// export default App;
-// App.jsx
-// App.jsx
-// App.jsx (unchanged)
-// App.jsx (unchanged)
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "./firebase/firebase";
 import { fetchMatchDetails } from "./services/cricbuzzApi";
@@ -109,6 +10,16 @@ function App() {
   const [match, setMatch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
+
+  const handleError = useCallback((message, isFatal = false) => {
+    console.error(message);
+    setError(message);
+    if (isFatal) {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const matchRef = doc(db, "matches", "currentMatch");
@@ -118,60 +29,96 @@ function App() {
         if (docSnapshot.exists()) {
           const data = docSnapshot.data();
           if (data?.matchId) {
+            console.log("Match ID from Firestore:", data.matchId);
             setMatchId(data.matchId);
+            setError(null);
           } else {
-            setError("No match ID found in Firestore");
-            setLoading(false);
+            handleError("No match ID found in Firestore", true);
           }
         } else {
-          setError("No active match found");
-          setLoading(false);
+          handleError("No active match found", true);
         }
       },
       (err) => {
-        setError(`Firestore connection failed: ${err.message}`);
-        setLoading(false);
+        handleError(`Firestore connection failed: ${err.message}`, true);
       }
     );
 
     return () => unsub();
-  }, []);
+  }, [handleError]);
 
   useEffect(() => {
     if (!matchId) return;
 
     let intervalId;
+    let isMounted = true;
+
     const fetchData = async () => {
       try {
+        if (!isMounted) return;
+        
         const data = await fetchMatchDetails(matchId);
+        if (!isMounted) return;
+
         setMatch(data);
         setError(null);
+        setRetryCount(0);
       } catch (err) {
-        setError(`Failed to load match details: ${err.message}`);
-        setMatch(null);
+        if (!isMounted) return;
+
+        const newRetryCount = retryCount + 1;
+        setRetryCount(newRetryCount);
+
+        if (newRetryCount >= MAX_RETRIES) {
+          handleError(`Failed to load match details after ${MAX_RETRIES} attempts: ${err.message}`);
+          setMatch(null);
+        } else {
+          console.warn(`Retry attempt ${newRetryCount} of ${MAX_RETRIES}`);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchData().finally(() => setLoading(false));
+    fetchData();
 
     if (!error && match?.status === "live") {
       intervalId = setInterval(fetchData, 30000);
     }
 
-    return () => intervalId && clearInterval(intervalId);
-  }, [matchId]);
+    return () => {
+      isMounted = false;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [matchId, retryCount, error, match?.status, handleError]);
+
+  const handleRetry = () => {
+    setRetryCount(0);
+    setError(null);
+    setLoading(true);
+  };
 
   return (
     <div className="min-h-screen bg-gray-800">
-      <header className="bg-gray-900 text-white py-4 shadow-md">
-        <h1 className="text-2xl md:text-3xl font-bold text-center">
+      <header className="py-4 text-white bg-gray-900 shadow-md">
+        <h1 className="text-2xl font-bold text-center md:text-3xl">
           Cricket Scoreboard
         </h1>
       </header>
-      <main className="container mx-auto py-8 px-4">
+      <main className="container px-4 py-8 mx-auto">
         {error && (
-          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded">
+          <div className="p-4 mb-6 text-red-700 bg-red-100 border-l-4 border-red-500 rounded">
             <p>{error}</p>
+            {retryCount >= MAX_RETRIES && (
+              <button
+                onClick={handleRetry}
+                className="px-4 py-2 mt-2 text-white transition-colors bg-red-500 rounded hover:bg-red-600"
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
         {loading ? (
@@ -179,7 +126,15 @@ function App() {
         ) : match ? (
           <MatchCard match={match} />
         ) : (
-          <p className="text-center text-gray-400">No match data available</p>
+          <div className="p-8 text-center text-gray-400 bg-gray-700 rounded-lg">
+            <p>No match data available</p>
+            <button
+              onClick={handleRetry}
+              className="px-4 py-2 mt-4 text-white transition-colors bg-blue-500 rounded hover:bg-blue-600"
+            >
+              Refresh
+            </button>
+          </div>
         )}
       </main>
     </div>

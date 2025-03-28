@@ -1,201 +1,107 @@
-// services/cricbuzzApi.js
+// src/services/cricbuzzApi.js
 import axios from "axios";
 
-const MATCH_DETAILS_URL = "/api/cricket-match/";
+const MATCH_DETAILS_URL = "/api/cricket-match/commentary/";
+const API_TIMEOUT = 10000;
+const CACHE_DURATION = 30000; // 30 seconds
+const MAX_RETRIES = 3;
 
-let cachedData = null;
-let lastFetchTime = 0;
-const CACHE_DURATION = 30000;
+// Cache implementation
+class MatchCache {
+  constructor() {
+    this.data = null;
+    this.lastFetchTime = 0;
+  }
 
-// Mock data for testing
-const mockMatchData = {
-  matchInfo: {
-    matchId: "104860",
-    status: "completed",
-    seriesName: "INDIAN PREMIER LEAGUE 2025",
-    matchNumber: "6TH MATCH",
-    startTime: "2025-03-27T19:30:00",
-    team1: {
-      id: "1",
-      name: "Rajasthan Royals",
-      shortName: "RR",
-      logoUrl: "https://www.cricbuzz.com/a/img/v1/50x50/i1/c170661/rr.jpg",
-    },
-    team2: {
-      id: "2",
-      name: "Kolkata Knight Riders",
-      shortName: "KKR",
-      logoUrl: "https://www.cricbuzz.com/a/img/v1/50x50/i1/c170678/kkr.jpg",
-    },
-    result: {
-      winningTeamId: "2",
-      resultText: "Kolkata Knight Riders won by 8 wkts",
-    },
-  },
-  matchScore: {
-    team1Score: { inngs1: { runs: 152, wickets: 3, overs: "17.3" } },
-    team2Score: { inngs1: { runs: 155, wickets: 2, overs: "17.0" } },
-  },
-  battingStats: [
-    {
-      name: "Quinton de Kock",
-      runs: 97,
-      balls: 61,
-      fours: 8,
-      sixes: 6,
-      strikeRate: "159.02",
-      isNotOut: true,
-    },
-    {
-      name: "Angkrish Raghuvanshi",
-      runs: 22,
-      balls: 17,
-      fours: 2,
-      sixes: 0,
-      strikeRate: "129.41",
-      isNotOut: false,
-    },
-  ],
-  bowlingStats: [
-    {
-      name: "Trent Boult",
-      overs: "4.0",
-      maidens: 0,
-      runs: 35,
-      wickets: 1,
-      economy: "8.75",
-    },
-    {
-      name: "Yuzvendra Chahal",
-      overs: "3.0",
-      maidens: 0,
-      runs: 28,
-      wickets: 1,
-      economy: "9.33",
-    },
-  ],
+  set(data) {
+    this.data = data;
+    this.lastFetchTime = Date.now();
+  }
+
+  get() {
+    if (!this.data) return null;
+    if (Date.now() - this.lastFetchTime > CACHE_DURATION) {
+      this.data = null;
+      return null;
+    }
+    return this.data;
+  }
+
+  clear() {
+    this.data = null;
+    this.lastFetchTime = 0;
+  }
+}
+
+const matchCache = new MatchCache();
+
+// Error handling
+class APIError extends Error {
+  constructor(message, status, code) {
+    super(message);
+    this.name = "APIError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+// Data validation
+const validateMatchData = (data) => {
+  if (!data) throw new APIError("No data received from API", 500, "NO_DATA");
+  if (!data.matchHeader) throw new APIError("Invalid match data structure", 500, "INVALID_DATA");
+  return true;
 };
 
-export const fetchMatchDetails = async (matchId) => {
-  try {
-    if (!matchId || typeof matchId !== "string") {
-      throw new Error("Invalid match ID provided");
-    }
+// Data transformation
+const transformMatchHeader = (matchHeader) => {
+  const status = matchHeader.complete ? "completed" : 
+                 matchHeader.status === "Match Ended" ? "completed" :
+                 matchHeader.status === "In Progress" ? "live" : "upcoming";
 
-    const now = Date.now();
-    if (cachedData && now - lastFetchTime < CACHE_DURATION) {
-      console.log("Returning cached match data");
-      return cachedData;
-    }
+  return {
+    matchId: matchHeader.matchId,
+    status,
+    seriesName: matchHeader.seriesName || "Unknown Series",
+    matchNumber: matchHeader.matchDescription || "N/A",
+    startTime: matchHeader.startTime || new Date().toISOString(),
+    team1: {
+      id: matchHeader.team1?.id?.toString() || "1",
+      name: matchHeader.team1?.name || "Team 1",
+      shortName: matchHeader.team1?.shortName || "T1",
+      logoUrl: matchHeader.team1?.image || "https://placehold.co/50x50",
+    },
+    team2: {
+      id: matchHeader.team2?.id?.toString() || "2",
+      name: matchHeader.team2?.name || "Team 2",
+      shortName: matchHeader.team2?.shortName || "T2",
+      logoUrl: matchHeader.team2?.image || "https://placehold.co/50x50",
+    },
+    venue: {
+      ground: matchHeader.venueInfo?.ground || "Unknown Stadium",
+      city: matchHeader.venueInfo?.city || "Unknown City",
+      country: matchHeader.venueInfo?.country || "Unknown Country",
+      startTime: matchHeader.venueInfo?.startTime,
+    },
+    result: matchHeader.status ? {
+      winningTeamId: matchHeader.team2?.id?.toString() || "2",
+      resultText: matchHeader.status,
+    } : null,
+  };
+};
 
-    console.log(`Fetching match details for matchId: ${matchId}`);
-    const response = await axios.get(`${MATCH_DETAILS_URL}${matchId}`, {
-      timeout: 10000,
-    });
-
-    const matchData = response.data;
-    if (!matchData?.matchInfo || !matchData?.matchScore) {
-      throw new Error("Invalid match data structure");
-    }
-
-    const matchInfo = matchData.matchInfo;
-    const matchScore = matchData.matchScore;
-    const battingStats = matchData.battingStats || [];
-    const bowlingStats = matchData.bowlingStats || [];
-
-    const formattedData = {
-      matchId: matchInfo.matchId,
-      status: matchInfo.status || "upcoming",
-      seriesName: matchInfo.seriesName || "Unknown Series",
-      matchNumber: matchInfo.matchNumber || "N/A",
-      startTime: matchInfo.startTime || null,
-      teams: [
-        {
-          teamId: matchInfo.team1.id,
-          teamName: matchInfo.team1.name,
-          shortName: matchInfo.team1.shortName,
-          logo: matchInfo.team1.logoUrl,
-          score: matchScore.team1Score?.inngs1?.runs || 0,
-          wickets: matchScore.team1Score?.inngs1?.wickets || 0,
-          overs: matchScore.team1Score?.inngs1?.overs || "0.0",
-        },
-        {
-          teamId: matchInfo.team2.id,
-          teamName: matchInfo.team2.name,
-          shortName: matchInfo.team2.shortName,
-          logo: matchInfo.team2.logoUrl,
-          score: matchScore.team2Score?.inngs1?.runs || 0,
-          wickets: matchScore.team2Score?.inngs1?.wickets || 0,
-          overs: matchScore.team2Score?.inngs1?.overs || "0.0",
-        },
-      ],
-      result: matchInfo.result || null,
-      battingStats: battingStats.map((player) => ({
-        name: player.name,
-        runs: player.runs || 0,
-        balls: player.balls || 0,
-        fours: player.fours || 0,
-        sixes: player.sixes || 0,
-        strikeRate: player.strikeRate || "0.00",
-        isNotOut: player.isNotOut || false,
-      })),
-      bowlingStats: bowlingStats.map((player) => ({
-        name: player.name,
-        overs: player.overs || "0.0",
-        maidens: player.maidens || 0,
-        runs: player.runs || 0,
-        wickets: player.wickets || 0,
-        economy: player.economy || "0.00",
-      })),
-      points: calculatePoints(matchInfo, matchScore),
-    };
-
-    lastFetchTime = now;
-    cachedData = formattedData;
-    return formattedData;
-  } catch (error) {
-    console.error("Error fetching match details:", error);
-
-    // Fallback to mock data for testing
-    if (error.response?.status === 404 || error.code === "ERR_BAD_REQUEST") {
-      console.warn("Falling back to mock data due to API failure");
-      const matchInfo = mockMatchData.matchInfo;
-      const matchScore = mockMatchData.matchScore;
-      return {
-        matchId: matchInfo.matchId,
-        status: matchInfo.status || "upcoming",
-        seriesName: matchInfo.seriesName || "Unknown Series",
-        matchNumber: matchInfo.matchNumber || "N/A",
-        startTime: matchInfo.startTime || null,
-        teams: [
-          {
-            teamId: matchInfo.team1.id,
-            teamName: matchInfo.team1.name,
-            shortName: matchInfo.team1.shortName,
-            logo: matchInfo.team1.logoUrl,
-            score: matchScore.team1Score?.inngs1?.runs || 0,
-            wickets: matchScore.team1Score?.inngs1?.wickets || 0,
-            overs: matchScore.team1Score?.inngs1?.overs || "0.0",
-          },
-          {
-            teamId: matchInfo.team2.id,
-            teamName: matchInfo.team2.name,
-            shortName: matchInfo.team2.shortName,
-            logo: matchInfo.team2.logoUrl,
-            score: matchScore.team2Score?.inngs1?.runs || 0,
-            wickets: matchScore.team2Score?.inngs1?.wickets || 0,
-            overs: matchScore.team2Score?.inngs1?.overs || "0.0",
-          },
-        ],
-        result: matchInfo.result || null,
-        battingStats: mockMatchData.battingStats,
-        bowlingStats: mockMatchData.bowlingStats,
-        points: calculatePoints(matchInfo, matchScore),
-      };
-    }
-
-    throw new Error(error.response?.data?.message || error.message);
-  }
+const transformMiniscore = (miniscore) => {
+  const defaultScore = { inngs1: { runs: 0, wickets: 0, overs: "0.0" } };
+  
+  return {
+    team1Score: miniscore.team1Score || defaultScore,
+    team2Score: miniscore.team2Score || defaultScore,
+    currentRunRate: miniscore.currentRunRate,
+    requiredRunRate: miniscore.requiredRunRate,
+    lastWicket: miniscore.lastWicket,
+    partnership: miniscore.partnership,
+    lastOver: miniscore.lastOver,
+    matchStatus: miniscore.matchStatus,
+  };
 };
 
 const calculatePoints = (matchInfo, matchScore) => {
@@ -223,3 +129,135 @@ const calculatePoints = (matchInfo, matchScore) => {
 
   return { team1Points, team2Points };
 };
+
+const transformBattingStats = (battingData) => {
+  if (!battingData) return [];
+  
+  return battingData.map(player => ({
+    name: player.name,
+    runs: player.runs || 0,
+    balls: player.balls || 0,
+    fours: player.fours || 0,
+    sixes: player.sixes || 0,
+    strikeRate: player.strikeRate || "0.00",
+    notOut: player.notOut || false
+  }));
+};
+
+const transformBowlingStats = (bowlingData) => {
+  if (!bowlingData) return [];
+  
+  return bowlingData.map(player => ({
+    name: player.name,
+    overs: player.overs || "0.0",
+    maidens: player.maidens || 0,
+    runs: player.runs || 0,
+    wickets: player.wickets || 0,
+    economy: player.economy || "0.00"
+  }));
+};
+
+export const fetchMatchDetails = async (matchId) => {
+  try {
+    if (!matchId || typeof matchId !== "string") {
+      throw new APIError("Invalid match ID provided", 400, "INVALID_MATCH_ID");
+    }
+
+    const cachedData = matchCache.get();
+    if (cachedData) {
+      return cachedData;
+    }
+
+    let retries = 0;
+    let lastError = null;
+
+    while (retries < MAX_RETRIES) {
+      try {
+        const response = await axios.get(`${MATCH_DETAILS_URL}${matchId}`, {
+          timeout: API_TIMEOUT,
+        });
+
+        validateMatchData(response.data);
+        const matchData = response.data;
+
+        const matchHeader = transformMatchHeader(matchData.matchHeader);
+        const miniscore = transformMiniscore(matchData.miniscore);
+        const battingStats = transformBattingStats(matchData.battingStats);
+        const bowlingStats = transformBowlingStats(matchData.bowlingStats);
+
+        const formattedData = {
+          matchId: matchHeader.matchId,
+          status: matchHeader.status,
+          seriesName: matchHeader.seriesName,
+          matchNumber: matchHeader.matchNumber,
+          startTime: matchHeader.startTime,
+          teams: [
+            {
+              teamId: matchHeader.team1.id,
+              teamName: matchHeader.team1.name,
+              shortName: matchHeader.team1.shortName,
+              logo: matchHeader.team1.logoUrl,
+              score: miniscore.team1Score?.inngs1?.runs || 0,
+              wickets: miniscore.team1Score?.inngs1?.wickets || 0,
+              overs: miniscore.team1Score?.inngs1?.overs || "0.0",
+              runRate: miniscore.currentRunRate,
+            },
+            {
+              teamId: matchHeader.team2.id,
+              teamName: matchHeader.team2.name,
+              shortName: matchHeader.team2.shortName,
+              logo: matchHeader.team2.logoUrl,
+              score: miniscore.team2Score?.inngs1?.runs || 0,
+              wickets: miniscore.team2Score?.inngs1?.wickets || 0,
+              overs: miniscore.team2Score?.inngs1?.overs || "0.0",
+              runRate: miniscore.requiredRunRate,
+            },
+          ],
+          venue: matchHeader.venue,
+          result: matchHeader.result,
+          points: calculatePoints(matchHeader, miniscore),
+          battingStats,
+          scoreboard: {
+            currentRunRate: miniscore.currentRunRate,
+            requiredRunRate: miniscore.requiredRunRate,
+            lastWicket: miniscore.lastWicket,
+            partnership: miniscore.partnership,
+            lastOver: miniscore.lastOver,
+            matchStatus: miniscore.matchStatus,
+            bowlingStats
+          },
+          additionalInfo: {
+            "Match Type": matchData.matchHeader.matchType || "N/A",
+            "Toss Winner": matchData.matchHeader.tossWinner || "N/A",
+            "Toss Decision": matchData.matchHeader.tossDecision || "N/A",
+            "Venue": `${matchHeader.venue.ground}, ${matchHeader.venue.city}`,
+            "Start Time": new Date(matchHeader.startTime).toLocaleString()
+          },
+        };
+
+        matchCache.set(formattedData);
+        return formattedData;
+      } catch (error) {
+        lastError = error;
+        retries++;
+        if (retries < MAX_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+        }
+      }
+    }
+
+    throw lastError || new APIError("Failed to fetch match details", 500, "FETCH_ERROR");
+  } catch (error) {
+    if (error instanceof APIError) {
+      throw error;
+    }
+    throw new APIError(
+      error.message || "Failed to fetch match details",
+      error.response?.status || 500,
+      error.code || "UNKNOWN_ERROR"
+    );
+  }
+};
+
+// Export cache methods for testing
+export const clearCache = () => matchCache.clear();
