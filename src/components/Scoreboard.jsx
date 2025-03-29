@@ -247,7 +247,7 @@ const Scoreboard = memo(({ match }) => {
       {battingStats && battingStats.length > 0 && <BattingStats stats={battingStats} />}
 
       {/* Bowling Stats */}
-      {bowlingStats && bowlingStats.length > 0 && <BowlingStats stats={bowlingStats} />}
+      {bowlingStats && bowlingStats.length > 0 && <BattingStats stats={bowlingStats} />}
 
       {/* Match Status */}
       {matchStatus && (
